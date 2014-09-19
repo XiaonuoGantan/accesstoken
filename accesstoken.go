@@ -9,6 +9,7 @@ import (
 	"hash"
 	"net/http"
 	"time"
+	"errors"
 )
 
 func GetUserIDAndExpiryTimeAccessToken(accessToken []byte, expiryTime time.Duration, signer *vm_signer.Base64TimeSigner) ([]byte, bool) {
@@ -42,7 +43,7 @@ type AuthContext struct {
 	accessToken []byte
 }
 
-func (ac AuthContext) GetAccessToken() ([]byte, bool) {
+func (ac AuthContext) GetAccessTokenRawBytes() ([]byte, bool) {
 	h := hmac.New(func() hash.Hash {
 		return md5.New()
 	}, []byte(ac.secret))
@@ -50,6 +51,19 @@ func (ac AuthContext) GetAccessToken() ([]byte, bool) {
 	return GetUserIDAndExpiryTimeAccessToken(
 		ac.accessToken, ac.expiryTime, signer,
 	)
+}
+
+func (ac AuthContext) GetAccessTokenData() (map[string]interface{}, error) {
+	data, ok := ac.GetAccessTokenRawBytes()
+	var out map[string]interface{}
+	if ok {
+		err := msgpack.Unmarshal(data, &out)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+	return nil, errors.New("AccessToken not processable")
 }
 
 func AttachAuthContext(secret string, expiryTime time.Duration, accessTokenHeaderField string) martini.Handler {

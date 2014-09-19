@@ -1,9 +1,7 @@
 package accesstoken
 
 import (
-	"fmt"
 	"github.com/go-martini/martini"
-	"github.com/vmihailenco/msgpack"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,13 +9,8 @@ import (
 )
 
 func GetHome(authContext AuthContext, parms martini.Params) (int, string) {
-	data, ok := authContext.GetAccessToken()
-	if ok {
-		var out map[string]interface{}
-		err := msgpack.Unmarshal(data, &out)
-		if err != nil {
-			fmt.Println(err)
-		}
+	out, err := authContext.GetAccessTokenData()
+	if err == nil {
 		if userID, ok := out["userID"].(string); ok {
 			if userID != "123456" {
 				return http.StatusForbidden, "userID incorrect"
@@ -39,8 +32,9 @@ func GetHome(authContext AuthContext, parms martini.Params) (int, string) {
 		} else {
 			return http.StatusInternalServerError, "version not processable"
 		}
+		return http.StatusOK, "Got Home"
 	}
-	return http.StatusOK, "Got Home"
+	return http.StatusBadRequest, err.Error()
 }
 
 func Test_AccessToken(t *testing.T) {

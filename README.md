@@ -7,6 +7,7 @@ A martini middleware that handles access serialization / de-serialization before
 Example
 ===========
 
+```go
 import (
 	"github.com/go-martini/martini"
 	"net/http"
@@ -66,4 +67,5 @@ func Test_AccessToken(t *testing.T) {
 		t.Error("ResponseRecorder.Body ", recorder.Body)
 	}
 }
+```
 
