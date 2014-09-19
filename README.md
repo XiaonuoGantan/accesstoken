@@ -18,6 +18,9 @@ import (
 
 func GetHome(authContext AuthContext, parms martini.Params) (int, string) {
 	out, err := authContext.GetAccessTokenData()
+	if err != nil {
+		return http.StatusBadRequest, err.Error()
+	}
 	if err == nil {
 		if userID, ok := out["userID"].(string); ok {
 			if userID != "123456" {
@@ -25,13 +28,6 @@ func GetHome(authContext AuthContext, parms martini.Params) (int, string) {
 			}
 		} else {
 			return http.StatusInternalServerError, "userID not processable"
-		}
-		if expiryTime, ok := out["expiryTime"].(int64); ok {
-			if expiryTime != 123 {
-				return http.StatusForbidden, "expiryTime incorrect"
-			}
-		} else {
-			return http.StatusInternalServerError, "expiryTime not processable"
 		}
 		if version, ok := out["version"].(int64); ok {
 			if version != 0 {
@@ -49,21 +45,34 @@ func Test_AccessToken(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	m := martini.New()
 	m.Use(AttachAuthContext(
-		"secret", time.Duration(123), "X-Browzoo-Authorization",
+		"secret", "X-Browzoo-Authorization",
 	))
 	r := martini.NewRouter()
 	r.Get("/", GetHome)
 	m.Action(r.Handle)
 
-	// Verify the access token works
+	// Make an access token that expires in 10 seconds in the future
 	accessToken := GenerateUserIDAndExpiryTimeAccessToken(
-		[]byte("123456"), time.Duration(123), "secret", 0,
+		[]byte("123456"), time.Duration(10*time.Second), "secret", 0,
 	)
 	req, _ := http.NewRequest("GET", "/", nil)
 	req.Header.Add("X-Browzoo-Authorization", string(accessToken))
 	m.ServeHTTP(recorder, req)
-	if recorder.Code != 200 {
+	if recorder.Code != http.StatusOK {
 		t.Error("ResponseRecorder.Code not 200; it's ", recorder.Code)
+		t.Error("ResponseRecorder.Body ", recorder.Body)
+	}
+
+	// Make an access token that expires in 10 seconds in the past
+	recorder = httptest.NewRecorder()
+	accessToken = GenerateUserIDAndExpiryTimeAccessToken(
+		[]byte("123456"), time.Duration(-10*time.Second), "secret", 0,
+	)
+	req, _ = http.NewRequest("GET", "/", nil)
+	req.Header.Add("X-Browzoo-Authorization", string(accessToken))
+	m.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Error("ResponseRecorder.Code not 400; it's ", recorder.Code)
 		t.Error("ResponseRecorder.Body ", recorder.Body)
 	}
 }

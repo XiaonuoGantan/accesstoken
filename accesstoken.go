@@ -9,11 +9,10 @@ import (
 	"hash"
 	"net/http"
 	"time"
-	"errors"
 )
 
-func GetUserIDAndExpiryTimeAccessToken(accessToken []byte, expiryTime time.Duration, signer *vm_signer.Base64TimeSigner) ([]byte, bool) {
-	return signer.Verify(accessToken, expiryTime)
+func GetUserIDAndExpiryTimeAccessToken(accessToken []byte, signer *vm_signer.Base64Signer) ([]byte, bool) {
+	return signer.Verify(accessToken)
 }
 
 func GenerateUserIDAndExpiryTimeAccessToken(
@@ -22,7 +21,7 @@ func GenerateUserIDAndExpiryTimeAccessToken(
 	h := hmac.New(func() hash.Hash {
 		return md5.New()
 	}, []byte(secret))
-	s := vm_signer.NewBase64TimeSigner(h)
+	s := vm_signer.NewBase64Signer(h)
 	u := map[string]interface{}{
 		"version": version, "userID": userID, "expiryTime": expiryTime,
 	}
@@ -33,12 +32,35 @@ func GenerateUserIDAndExpiryTimeAccessToken(
 	return s.Sign(data)
 }
 
+type ProcessError struct {
+	error string
+}
+
+func (e ProcessError) Error() string {
+	return e.error
+}
+
+func NewProcessError(text string) error {
+	return &ProcessError{text}
+}
+
+type ExpiredError struct {
+	error string
+}
+
+func (e ExpiredError) Error() string {
+	return e.error
+}
+
+func NewExpiredError(text string) error {
+	return &ExpiredError{text}
+}
+
 type AuthContextInterface interface {
 	GetAccessToken() ([]byte, bool)
 }
 
 type AuthContext struct {
-	expiryTime  time.Duration
 	secret      string
 	accessToken []byte
 }
@@ -47,9 +69,9 @@ func (ac AuthContext) GetAccessTokenRawBytes() ([]byte, bool) {
 	h := hmac.New(func() hash.Hash {
 		return md5.New()
 	}, []byte(ac.secret))
-	signer := vm_signer.NewBase64TimeSigner(h)
+	signer := vm_signer.NewBase64Signer(h)
 	return GetUserIDAndExpiryTimeAccessToken(
-		ac.accessToken, ac.expiryTime, signer,
+		ac.accessToken, signer,
 	)
 }
 
@@ -61,17 +83,26 @@ func (ac AuthContext) GetAccessTokenData() (map[string]interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
+		if expiryTime, ok := out["expiryTime"].(int64); ok {
+			expiresAt := time.Duration(expiryTime)
+			now := time.Duration(time.Now().UTC().Unix())
+			if expiresAt < now {
+				return nil, NewExpiredError("AccessToken expired")
+			}
+		} else {
+			return nil, NewProcessError("expiryTime not processable")
+		}
 		return out, nil
 	}
-	return nil, errors.New("AccessToken not processable")
+	return nil, NewProcessError("AccessToken not processable")
 }
 
-func AttachAuthContext(secret string, expiryTime time.Duration, accessTokenHeaderField string) martini.Handler {
+func AttachAuthContext(secret string, accessTokenHeaderField string) martini.Handler {
 	return func(res http.ResponseWriter, req *http.Request, c martini.Context) {
 		accessToken := []byte(req.Header.Get(accessTokenHeaderField))
 		if accessToken != nil {
-			authContext := AuthContext{expiryTime, secret, accessToken}
-			c.Map(authContext)
+			ac := AuthContext{secret, accessToken}
+			c.Map(ac)
 		}
 	}
 }
