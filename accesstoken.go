@@ -4,61 +4,32 @@ import (
 	"crypto/hmac"
 	"crypto/md5"
 	"github.com/go-martini/martini"
+	"github.com/vmihailenco/msgpack"
 	vm_signer "github.com/vmihailenco/signer"
+	"hash"
 	"net/http"
 	"time"
-	"hash"
-	"encoding/gob"
-	"bytes"
-	"log"
 )
 
 func GetUserIDAndExpiryTimeAccessToken(accessToken []byte, expiryTime time.Duration, signer *vm_signer.Base64TimeSigner) ([]byte, bool) {
 	return signer.Verify(accessToken, expiryTime)
 }
 
-type UserIDExpiryTime struct {
-	userID []byte
-	expiryTime time.Duration
-}
-
-func (u *UserIDExpiryTime) GobEncode() ([]byte, error) {
-	w := new(bytes.Buffer)
-	encoder := gob.NewEncoder(w)
-	err := encoder.Encode(u.userID)
-	if err != nil {
-		return nil, err
-	}
-	err = encoder.Encode(u.expiryTime)
-	if err != nil {
-		return nil, err
-	}
-	return w.Bytes(), nil
-}
-
-func (u *UserIDExpiryTime) GobDecode(buf []byte) error {
-	r := bytes.NewBuffer(buf)
-	decoder := gob.NewDecoder(r)
-	err := decoder.Decode(&u.userID)
-	if err != nil {
-		return err
-	}
-	return decoder.Decode(&u.expiryTime)
-}
-
-func GenerateUserIDAndExpiryTimeAccessToken(userID []byte, expiryTime time.Duration, secret string) ([]byte) {
+func GenerateUserIDAndExpiryTimeAccessToken(
+	userID []byte, expiryTime time.Duration, secret string, version int8,
+) []byte {
 	h := hmac.New(func() hash.Hash {
 		return md5.New()
 	}, []byte(secret))
 	s := vm_signer.NewBase64TimeSigner(h)
-	u := UserIDExpiryTime{userID, expiryTime}
-	buffer := new(bytes.Buffer)
-	enc := gob.NewEncoder(buffer)
-	err := enc.Encode(u)
-	if err != nil {
-		log.Fatal("encode error:", err)
+	u := map[string]interface{}{
+		"version": version, "userID": userID, "expiryTime": expiryTime,
 	}
-	return s.Sign(buffer.Bytes())
+	data, err := msgpack.Marshal(u)
+	if err != nil {
+		panic(err)
+	}
+	return s.Sign(data)
 }
 
 type AuthContextInterface interface {
@@ -66,8 +37,8 @@ type AuthContextInterface interface {
 }
 
 type AuthContext struct {
-	expiryTime time.Duration
-	secret string
+	expiryTime  time.Duration
+	secret      string
 	accessToken []byte
 }
 
